@@ -11,12 +11,15 @@ DB_PATH = ROOT / "imss_threshold_demo.db"
 DATA_PATH = ROOT / "data" / "earnings_core_sample.csv"
 OUTPUTS_DIR = ROOT / "outputs"
 
+<<<<<<< HEAD
 SQL_FILES = [
     ROOT / "sql" / "01_create_tables.sql",
     ROOT / "sql" / "03_threshold_classification.sql",
     ROOT / "sql" / "05_audit_views.sql",
 ]
 
+=======
+>>>>>>> 97234b5 (Load expanded sample data from CSV)
 
 def run_sql_file(connection, file_path):
     with open(file_path, "r", encoding="utf-8") as file:
