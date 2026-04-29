@@ -8,11 +8,11 @@ from tabulate import tabulate
 
 ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "imss_threshold_demo.db"
+DATA_PATH = ROOT / "data" / "earnings_core_sample.csv"
 OUTPUTS_DIR = ROOT / "outputs"
 
 SQL_FILES = [
     ROOT / "sql" / "01_create_tables.sql",
-    ROOT / "sql" / "02_insert_sample_data.sql",
     ROOT / "sql" / "03_threshold_classification.sql",
     ROOT / "sql" / "05_audit_views.sql",
 ]
@@ -24,14 +24,29 @@ def run_sql_file(connection, file_path):
     connection.executescript(sql_script)
 
 
+def load_csv_to_database(connection):
+    df = pd.read_csv(DATA_PATH)
+
+    df.to_sql(
+        "earnings_core",
+        connection,
+        if_exists="append",
+        index=False
+    )
+
+    connection.commit()
+
+
 def setup_database():
     if DB_PATH.exists():
         DB_PATH.unlink()
 
     connection = sqlite3.connect(DB_PATH)
 
-    for sql_file in SQL_FILES:
-        run_sql_file(connection, sql_file)
+    run_sql_file(connection, ROOT / "sql" / "01_create_tables.sql")
+    load_csv_to_database(connection)
+    run_sql_file(connection, ROOT / "sql" / "03_threshold_classification.sql")
+    run_sql_file(connection, ROOT / "sql" / "05_audit_views.sql")
 
     connection.commit()
     return connection
@@ -42,9 +57,9 @@ def query_df(connection, query):
 
 
 def print_table(title, df):
-    print("\n" + "=" * 90)
+    print("\n" + "=" * 110)
     print(title)
-    print("=" * 90)
+    print("=" * 110)
 
     if df.empty:
         print("No records found.")
@@ -67,9 +82,11 @@ def show_raw_data(connection):
             earner_uuid,
             vehicle_category,
             gross_monthly_income,
+            service_income,
             tips_amount,
             referral_bonuses,
             promotional_incentives,
+            cash_collections_adjustment,
             iva_withheld
         FROM earnings_core
         ORDER BY earner_uuid;
@@ -149,6 +166,7 @@ def show_iva_clean_sample(connection):
             earner_uuid,
             vehicle_category,
             gross_monthly_income,
+            service_income,
             tips_amount,
             referral_bonuses,
             promotional_incentives,
@@ -157,7 +175,7 @@ def show_iva_clean_sample(connection):
             iva_consistency_check,
             imss_status_defense_position
         FROM view_iva_clean_sample
-        ORDER BY net_income_defense_position DESC;
+        ORDER BY vehicle_category, net_income_defense_position DESC;
         """
     )
     print_table("SCENARIO 1 - IVA CLEAN SAMPLE", df)
@@ -172,13 +190,15 @@ def show_referral_defense(connection):
             earner_uuid,
             vehicle_category,
             gross_monthly_income,
+            service_income,
+            tips_amount,
             referral_bonuses,
             net_income_conservative_position,
             net_income_defense_position,
             imss_status_conservative_position,
             imss_status_defense_position
         FROM view_referral_defense_cases
-        ORDER BY referral_bonuses DESC;
+        ORDER BY vehicle_category, referral_bonuses DESC;
         """
     )
     print_table("SCENARIO 2 - REFERRAL DEFENSE CASES", df)
@@ -198,7 +218,7 @@ def show_presumptive_risk(connection):
             imss_status_defense_position,
             imss_status_presumptive_4_smgv
         FROM view_presumptive_risk_cases
-        ORDER BY net_income_presumptive_4_smgv DESC;
+        ORDER BY vehicle_category, net_income_presumptive_4_smgv DESC;
         """
     )
     print_table("SCENARIO 3 - PRESUMPTIVE OVERCLASSIFICATION RISK", df)
@@ -223,6 +243,25 @@ def show_tax_discrepancies(connection):
     export_output(df, "tax_discrepancy_alerts.csv")
 
 
+def show_threshold_edge_cases(connection):
+    df = query_df(
+        connection,
+        """
+        SELECT
+            earner_uuid,
+            vehicle_category,
+            net_income_defense_position,
+            imss_status_defense_position,
+            ROUND(ABS(net_income_defense_position - 9582.47), 2) AS distance_to_threshold
+        FROM final_results
+        ORDER BY distance_to_threshold ASC
+        LIMIT 10;
+        """
+    )
+    print_table("OPTIONAL - CLOSEST CASES TO THRESHOLD", df)
+    export_output(df, "threshold_edge_cases.csv")
+
+
 def show_all(connection):
     show_raw_data(connection)
     show_cleansed_income(connection)
@@ -233,6 +272,7 @@ def show_all(connection):
     show_referral_defense(connection)
     show_presumptive_risk(connection)
     show_tax_discrepancies(connection)
+    show_threshold_edge_cases(connection)
 
 
 def main():
@@ -253,6 +293,7 @@ def main():
             "referrals",
             "presumptive",
             "tax_alerts",
+            "edge_cases",
         ],
         default="all",
         help="Select which part of the demo to run."
@@ -282,6 +323,8 @@ def main():
         show_presumptive_risk(connection)
     elif args.scenario == "tax_alerts":
         show_tax_discrepancies(connection)
+    elif args.scenario == "edge_cases":
+        show_threshold_edge_cases(connection)
 
     connection.close()
 
